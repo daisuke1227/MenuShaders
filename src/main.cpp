@@ -1,17 +1,33 @@
+// iOS-specific includes and definitions
+#ifdef __APPLE__
+#include "TargetConditionals.h"
+#if TARGET_OS_IPHONE
+    // Use OpenGL ES 2.0 headers (or 3.0 if available)
+    #define GL_SILENCE_DEPRECATION
+    #include <OpenGLES/ES2/gl.h>
+    #include <OpenGLES/ES2/glext.h>
+
+    // If OpenGL ES 3.0 is not available, use the extension functions for VAOs.
+    // Many iOS devices support ES3.0 so this block may not be necessary.
+    #if !defined(GL_VERSION_ES_CM_1_0) && defined(GL_OES_vertex_array_object)
+        #define glGenVertexArrays           glGenVertexArraysOES
+        #define glBindVertexArray           glBindVertexArrayOES
+        #define glDeleteVertexArrays        glDeleteVertexArraysOES
+    #endif
+#endif
+#endif
+
 #include <Geode/Geode.hpp>
-
 #include <filesystem>
-
 #include <ctre.hpp>
+#include <sstream>
+#include <tuple>
+#include <vector>
+#include <algorithm>
 
 using namespace geode::prelude;
 
-// ported from https://github.com/matcool/small-gd-mods/blob/3e1783c7e281cbbccd53f9c4ceb697d5a6f839dd/src/menu-shaders.cpp
-
-// most of this is from
-// https://github.com/cocos2d/cocos2d-x/blob/5a25fe75cb8b26b61b14b070e757ec3b17ff7791/samples/Cpp/TestCpp/Classes/ShaderTest/ShaderTest.cpp
-// and
-// https://github.com/cgytrus/SimplePatchLoader/blob/752cf15eafd05a21031832f4dc847d78cd2cc5f7/src/pp.cpp
+// Ported from https://github.com/matcool/small-gd-mods and other sources
 
 struct Shader {
     GLuint vertex = 0;
@@ -67,7 +83,7 @@ struct Shader {
         };
         glShaderSource(vertex, sizeof(vertexSources) / sizeof(char*), vertexSources, nullptr);
         glCompileShader(vertex);
-        auto vertexLog = string::trim(getShaderLog(vertex));
+        auto vertexLog = utils::string::trim(getShaderLog(vertex));
 
         glGetShaderiv(vertex, GL_COMPILE_STATUS, &res);
         if(!res) {
@@ -75,11 +91,9 @@ struct Shader {
             vertex = 0;
             return Err("vertex shader compilation failed:\n{}", vertexLog);
         }
-
         if (vertexLog.empty()) {
             log::debug("vertex shader compilation successful");
-        }
-        else {
+        } else {
             log::debug("vertex shader compilation successful:\n{}", vertexLog);
         }
 
@@ -93,9 +107,9 @@ struct Shader {
 #endif
             fragmentSource.c_str()
         };
-        glShaderSource(fragment, sizeof(vertexSources) / sizeof(char*), fragmentSources, nullptr);
+        glShaderSource(fragment, sizeof(fragmentSources) / sizeof(char*), fragmentSources, nullptr);
         glCompileShader(fragment);
-        auto fragmentLog = string::trim(getShaderLog(fragment));
+        auto fragmentLog = utils::string::trim(getShaderLog(fragment));
 
         glGetShaderiv(fragment, GL_COMPILE_STATUS, &res);
         if(!res) {
@@ -105,18 +119,15 @@ struct Shader {
             fragment = 0;
             return Err("fragment shader compilation failed:\n{}", fragmentLog);
         }
-
         if (fragmentLog.empty()) {
             log::debug("fragment shader compilation successful");
-        }
-        else {
+        } else {
             log::debug("fragment shader compilation successful:\n{}", fragmentLog);
         }
 
         program = glCreateProgram();
         glAttachShader(program, vertex);
         glAttachShader(program, fragment);
-
         return Ok();
     }
 
@@ -140,7 +151,7 @@ struct Shader {
         GLint res;
 
         glLinkProgram(program);
-        auto programLog = string::trim(getProgramLog(program));
+        auto programLog = utils::string::trim(getProgramLog(program));
 
         glDeleteShader(vertex);
         glDeleteShader(fragment);
@@ -153,14 +164,11 @@ struct Shader {
             program = 0;
             return Err("shader link failed:\n{}", programLog);
         }
-
         if (programLog.empty()) {
             log::debug("shader link successful");
-        }
-        else {
+        } else {
             log::debug("shader link successful:\n{}", programLog);
         }
-
         return Ok();
     }
 
@@ -173,6 +181,7 @@ struct Shader {
 
 float shaderTime = 0.f;
 GLint shaderFrame = 0;
+
 class ShaderNode : public CCNode {
     Shader m_shader;
     GLuint m_vao = 0;
@@ -193,11 +202,6 @@ class ShaderNode : public CCNode {
     float m_deltaTime = 0.f;
     FMOD::DSP* m_fftDsp = nullptr;
     static constexpr int FFT_SPECTRUM_SIZE = 1024;
-    // gd cuts frequencies higher than ~16kHz, so we should too (the "140/512" part)
-    // we also remove the right half (by multiplying by 2), because it's a mirrored version of the left half, so we don't need that
-    // (and fmod actually removes it completely, so it's always all zeros anyway)
-    // (there are actually 513 empty bins instead of 512 but the last one gets cut off by the "140/512" part)
-    // i know, this is weird af
     static constexpr int FFT_ACTUAL_SPECTRUM_SIZE = FFT_SPECTRUM_SIZE - (FFT_SPECTRUM_SIZE * 140 / 512);
     static constexpr int FFT_WINDOW_SIZE = FFT_SPECTRUM_SIZE * 2;
     static constexpr float FFT_UPDATE_FREQUENCY = 20.f;
@@ -226,7 +230,6 @@ public:
         }
 
         glBindAttribLocation(m_shader.program, 0, "aPosition");
-
         res = m_shader.link();
         if (!res) {
             log::error("{}", res.unwrapErr());
@@ -247,7 +250,7 @@ public:
                     m_shaderSprites.push_back(sprite);
                 };
                 std::string::size_type pos;
-                while (pos = line.find(','), pos != std::string::npos) {
+                while ((pos = line.find(',')) != std::string::npos) {
                     auto me = line.substr(0, pos);
                     line = line.substr(pos + 1);
                     addSprite(me);
@@ -268,7 +271,7 @@ public:
                     m_uniformNodes.emplace_back(id, nullptr, pos, rot, scale, size, visible);
                 };
                 std::string::size_type pos;
-                while (pos = line.find(','), pos != std::string::npos) {
+                while ((pos = line.find(',')) != std::string::npos) {
                     auto me = line.substr(0, pos);
                     line = line.substr(pos + 1);
                     addNode(me);
@@ -279,7 +282,6 @@ public:
         }
 
         FMODAudioEngine::sharedEngine()->enableMetering();
-
         auto engine = FMODAudioEngine::sharedEngine();
         engine->m_system->createDSPByType(FMOD_DSP_TYPE_FFT, &m_fftDsp);
         engine->m_backgroundMusicChannel->addDSP(1, m_fftDsp);
@@ -292,7 +294,6 @@ public:
             -1.0f, 1.0f,
             -1.0f, -1.0f,
             1.0f, -1.0f,
-
             -1.0f,  1.0f,
             1.0f, -1.0f,
             1.0f,  1.0f
@@ -301,7 +302,7 @@ public:
         glGenBuffers(1, &m_vbo);
         glBindVertexArray(m_vao);
         glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), &vertices, GL_STATIC_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
         glEnableVertexAttribArray(0);
         glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(GLfloat), (void*)nullptr);
         glBindVertexArray(0);
@@ -309,26 +310,20 @@ public:
 
         m_uniformResolution = glGetUniformLocation(m_shader.program, "resolution");
         m_uniformResolutionShadertoy = glGetUniformLocation(m_shader.program, "iResolution");
-
         m_uniformTime = glGetUniformLocation(m_shader.program, "time");
         if (m_uniformTime == -1)
             m_uniformTime = glGetUniformLocation(m_shader.program, "iTime");
-
         m_uniformDeltaTime = glGetUniformLocation(m_shader.program, "deltaTime");
         if (m_uniformDeltaTime == -1)
             m_uniformDeltaTime = glGetUniformLocation(m_shader.program, "iTimeDelta");
-
         m_uniformFrameRate = glGetUniformLocation(m_shader.program, "frameRate");
         if (m_uniformFrameRate == -1)
             m_uniformFrameRate = glGetUniformLocation(m_shader.program, "iFrameRate");
-
         m_uniformFrame = glGetUniformLocation(m_shader.program, "frame");
         if (m_uniformFrame == -1)
             m_uniformFrame = glGetUniformLocation(m_shader.program, "iFrame");
-
         m_uniformMouse = glGetUniformLocation(m_shader.program, "mouse");
         m_uniformMouseShadertoy = glGetUniformLocation(m_shader.program, "iMouse");
-
         m_uniformPulse1 = glGetUniformLocation(m_shader.program, "pulse1");
         m_uniformPulse2 = glGetUniformLocation(m_shader.program, "pulse2");
         m_uniformPulse3 = glGetUniformLocation(m_shader.program, "pulse3");
@@ -384,11 +379,7 @@ public:
     static std::tuple<float, float, float, bool> getStuffRecursive(CCNode* node) {
         auto parent = node->getParent();
         if (!parent)
-            return std::make_tuple(
-                node->getRotation(),
-                node->getScaleX(), node->getScaleY(),
-                node->isVisible()
-            );
+            return std::make_tuple(node->getRotation(), node->getScaleX(), node->getScaleY(), node->isVisible());
         auto [parRot, parScaleX, parScaleY, parVis] = getStuffRecursive(parent);
         return std::make_tuple(
             parRot + node->getRotation(),
@@ -396,9 +387,9 @@ public:
             parVis && node->isVisible()
         );
     }
+
     void draw() override {
         glBindVertexArray(m_vao);
-
         ccGLUseProgram(m_shader.program);
 
         auto glv = CCDirector::sharedDirector()->getOpenGLView();
@@ -421,12 +412,10 @@ public:
         glUniform1f(m_uniformFrameRate, 1.f / m_deltaTime);
         glUniform1i(m_uniformFrame, shaderFrame);
 
-        // thx adaf for telling me where these are
         auto engine = FMODAudioEngine::sharedEngine();
         glUniform1f(m_uniformPulse1, engine->m_pulse1);
         glUniform1f(m_uniformPulse2, engine->m_pulse2);
         glUniform1f(m_uniformPulse3, engine->m_pulse3);
-
         glUniform1fv(m_uniformFft, FFT_ACTUAL_SPECTRUM_SIZE, m_spectrum);
 
         for (auto& [id, node, posLoc, rotLoc, scaleLoc, sizeLoc, visibleLoc] : m_uniformNodes) {
@@ -448,7 +437,6 @@ public:
         }
 
         glDrawArrays(GL_TRIANGLES, 0, 6);
-
         glBindVertexArray(0);
 
 #ifndef GEODE_IS_MACOS
@@ -470,8 +458,7 @@ public:
         std::filesystem::path vertexPath =
             (std::string)CCFileUtils::get()->fullPathForFilename(Mod::get()->expandSpriteName(name + "-vert.glsl").data(), false);
         if (!std::filesystem::exists(vertexPath)) {
-            vertexPath =
-                (std::string)CCFileUtils::get()->fullPathForFilename("any-vert.glsl"_spr, false);
+            vertexPath = (std::string)CCFileUtils::get()->fullPathForFilename("any-vert.glsl"_spr, false);
         }
 
         bool shouldPatch = false;
@@ -479,13 +466,11 @@ public:
             (std::string)CCFileUtils::get()->fullPathForFilename(Mod::get()->expandSpriteName(name + "-frag.glsl").data(), false);
         if (!std::filesystem::exists(fragmentPath)) {
             shouldPatch = true;
-            fragmentPath =
-                (std::string)CCFileUtils::get()->fullPathForFilename("menu-shader.fsh", false);
+            fragmentPath = (std::string)CCFileUtils::get()->fullPathForFilename("menu-shader.fsh", false);
         }
         if (!std::filesystem::exists(fragmentPath)) {
             shouldPatch = false;
-            fragmentPath =
-                (std::string)CCFileUtils::get()->fullPathForFilename("any-frag.glsl"_spr, false);
+            fragmentPath = (std::string)CCFileUtils::get()->fullPathForFilename("any-frag.glsl"_spr, false);
         }
 
         auto vertexSource = file::readString(vertexPath);
@@ -500,29 +485,21 @@ public:
         auto fragmentSource = fragmentSourceRes.unwrap();
 
         if (shouldPatch) {
-            // shadertoy
             if (auto match = ctre::multiline_search<R"((void\s+main)Image(\s*\(\s*)out\s+vec4\s+([A-Za-z_][A-Za-z0-9_]+)\s*,\s*in\s+vec2\s+([A-Za-z_][A-Za-z0-9_]+)(\s*\)))">(fragmentSource)) {
-                // mainImage to main
                 auto str = fmt::format(
                     "#define {} gl_FragCoord.xy\n#define {} gl_FragColor\n{}{}{}",
                     match.get<4>().str(), match.get<3>().str(),
                     match.get<1>().str(), match.get<2>().str(), match.get<5>().str()
                 );
                 fragmentSource.replace(match.get<0>().begin(), match.get<0>().end(), str);
-
-                // uniforms
-                // iChannelTime, iChannelResolution, iChanneli and iDate are not supported
                 fragmentSource =
                     "uniform vec3 iResolution;\n"
                     "uniform float iTime;\n"
                     "uniform float iTimeDelta;\n"
                     "uniform float iFrameRate;\n"
                     "uniform int iFrame;\n"
-                    "uniform vec4 iMouse;\n"
-                    + fragmentSource;
-            }
-            else {
-                // https://github.com/cgytrus/MenuShaders/issues/5 fix
+                    "uniform vec4 iMouse;\n" + fragmentSource;
+            } else {
                 fragmentSource = "#define gl_FragCoord gl_FragCoord.xy\n" + fragmentSource;
             }
         }
@@ -538,7 +515,6 @@ public:
             shaderTime = 0.f;
             return false;
         }
-
         auto res = ShaderNode::createWithMenuName(name);
         if (!res) {
             log::error("Failed to load menu shader: {}", res.unwrapErr());
