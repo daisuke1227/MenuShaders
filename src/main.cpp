@@ -1,4 +1,5 @@
-// iOS-specific includes and definitions
+unsigned int g_uNumberOfDraws = 0;
+
 #ifdef __APPLE__
 #include "TargetConditionals.h"
 #if TARGET_OS_IPHONE
