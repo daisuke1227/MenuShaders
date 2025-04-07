@@ -1,11 +1,13 @@
 cmake_minimum_required(VERSION 3.21)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-if ("${CMAKE_SYSTEM_NAME}" STREQUAL "iOS" OR IOS)
+
+if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
     set(CMAKE_OSX_ARCHITECTURES "arm64")
 else()
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64")
 endif()
+
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 
 project(MenuShaders VERSION 1.4.2)
@@ -26,6 +28,9 @@ setup_geode_mod(${PROJECT_NAME})
 
 if(WIN32)
     target_link_libraries(${PROJECT_NAME} opengl32)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    # iOS does not support the full OpenGL framework; use OpenGLES and UIKit instead.
+    target_link_libraries(${PROJECT_NAME} "-framework OpenGLES -framework UIKit")
 elseif(APPLE)
     target_link_libraries(${PROJECT_NAME} "-framework OpenGL -framework Cocoa")
 elseif(ANDROID)
